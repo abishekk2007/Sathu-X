@@ -46,7 +46,7 @@ export function DocumentList({
         description={
           search
             ? "Try a different search term."
-            : "Upload your study materials to use them with Spidey later."
+            : "Upload your study materials to use them with SathuX later."
         }
         action={
           !search ? (

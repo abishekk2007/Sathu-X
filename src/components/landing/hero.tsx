@@ -40,7 +40,7 @@ export function Hero() {
           transition={{ duration: 0.55, delay: 0.08, ease: "easeOut" }}
           className="mt-6 text-4xl font-semibold tracking-tight text-balance sm:text-6xl"
         >
-          Meet <span className="text-gradient">Spidey&nbsp;Bot.</span>
+          Meet <span className="text-gradient">SathuX.</span>
         </motion.h1>
 
         <motion.p
@@ -107,7 +107,7 @@ export function Hero() {
               <span className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 text-white">
                 <SpiderMark className="size-4" />
               </span>
-              <p className="text-xs font-medium">Spidey Bot</p>
+              <p className="text-xs font-medium">SathuX</p>
               <span className="ml-auto flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                 Student mode
               </span>

@@ -78,7 +78,7 @@ export function AppSidebar({
           collapsed && "justify-center px-2"
         )}
       >
-        <Link href="/chat" onClick={onNavigate} aria-label="Spidey Bot home">
+        <Link href="/chat" onClick={onNavigate} aria-label="SathuX home">
           <SpideyLogo compact={collapsed} className={collapsed ? "" : "pr-2"} />
         </Link>
         {isDesktop && !collapsed && (

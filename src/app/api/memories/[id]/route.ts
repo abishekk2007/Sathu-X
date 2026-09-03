@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { getAuthenticatedUser, getSupabaseServerClient } from "@/lib/supabase/server";
-import { deleteMemory, patchMemory } from "@/lib/memory";
+import { deleteMemory, patchMemory, screenMemoryCandidate } from "@/lib/memory";
 import type { $UserMemory } from "@/lib/memory";
 
 export const runtime = "nodejs";
@@ -96,6 +96,22 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) return jsonError(400, "invalid_request");
+
+  // Phase 8D — updated content is screened through the same deterministic gate:
+  // raw coordinates / conversation dumps can't be written via PATCH either.
+  const patchContent = parsed.data.content;
+  if (patchContent !== undefined && patchContent.trim().length > 0) {
+    const verdict = screenMemoryCandidate(patchContent).verdict;
+    if (verdict === "raw_location") {
+      return Response.json({ error: "raw_location_not_allowed" }, { status: 400 });
+    }
+    if (verdict === "conversation_dump") {
+      return Response.json({ error: "conversation_dump_not_allowed" }, { status: 400 });
+    }
+    if (verdict === "secret") {
+      return jsonError(400, "secrets_not_allowed");
+    }
+  }
 
   try {
     const supabase = await getSupabaseServerClient();

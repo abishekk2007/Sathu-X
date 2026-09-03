@@ -65,11 +65,11 @@ export function SiteFooter() {
 
         <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} Spidey Bot. All rights reserved.
+            © {new Date().getFullYear()} SathuX. All rights reserved.
           </p>
           <a
             href="#"
-            aria-label="Spidey Bot repository"
+            aria-label="SathuX repository"
             className="flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <Link2Icon className="size-4" />

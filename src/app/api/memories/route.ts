@@ -7,6 +7,7 @@ import {
   listMemories,
   looksSensitive,
   mapCategoryToType,
+  screenMemoryCandidate,
   upsertMemory,
 } from "@/lib/memory";
 import type { $UserMemory, MemoryType } from "@/lib/memory";
@@ -136,6 +137,22 @@ export async function POST(request: Request) {
   // Systems rule: credentials are never stored, even through the API.
   if (looksSensitive(content)) {
     return jsonError(400, "secrets_not_allowed");
+  }
+
+  // Phase 8D — the deterministic candidate gate protects EVERY write path.
+  // Raw coordinates and bulk conversation dumps are deliberately not storable.
+  const screened = screenMemoryCandidate(content);
+  if (screened.verdict === "raw_location") {
+    return Response.json(
+      { error: "raw_location_not_allowed" },
+      { status: 400 }
+    );
+  }
+  if (screened.verdict === "conversation_dump") {
+    return Response.json(
+      { error: "conversation_dump_not_allowed" },
+      { status: 400 }
+    );
   }
 
   const memoryType: MemoryType = type ?? mapCategoryToType(category ?? "general");

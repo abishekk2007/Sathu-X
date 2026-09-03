@@ -1020,7 +1020,7 @@ export function PlannerView() {
             <>
               {stats?.recommendation ? (
                 <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
-                  <span className="font-medium">Spidey suggests: </span>
+                  <span className="font-medium">SathuX suggests: </span>
                   {stats.recommendation}
                 </div>
               ) : null}
@@ -1097,7 +1097,7 @@ export function PlannerView() {
                 <EmptyState
                   icon={SparklesIcon}
                   title="Create your first study plan."
-                  description="Pick an exam and your available time — Spidey schedules sessions around your weakest topics."
+                   description="Pick an exam and your available time — SathuX schedules sessions around your weakest topics."
                   action={
                     <Button
                       size="sm"

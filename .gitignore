@@ -53,3 +53,6 @@ tmp-out.txt
 Thumbs.db
 .idea/
 .vscode/
+
+# supabase cli
+supabase/.temp/

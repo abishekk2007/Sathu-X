@@ -21,12 +21,12 @@ export function CtaSection() {
             Your AI. Your way.
           </h2>
           <p className="relative mx-auto mt-3 max-w-md text-muted-foreground">
-            Start a conversation, upload your notes, or plan tomorrow — Spidey
-            Bot keeps up with however you work.
+            Start a conversation, upload your notes, or plan tomorrow — SathuX
+            keeps up with however you work.
           </p>
           <Button size="lg" asChild className="group relative mt-8 h-11 px-7">
             <Link href="/signup">
-              Start with Spidey Bot
+              Start with SathuX
               <ArrowRightIcon data-icon="inline-end" className="transition-transform group-hover:translate-x-0.5" />
             </Link>
           </Button>

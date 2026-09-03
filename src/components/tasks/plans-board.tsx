@@ -102,7 +102,7 @@ export function PlansBoard() {
           <EmptyState
             icon={FolderKanbanIcon}
             title="No plans yet"
-            description="Ask Spidey Bot to make a study plan, or create one below."
+            description="Ask SathuX to make a study plan, or create one below."
             action={
               <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
                 New plan

@@ -144,7 +144,7 @@ export function LoginForm() {
       </Button>
 
       <p className="pt-2 text-center text-sm text-muted-foreground">
-        New to Spidey Bot?{" "}
+        New to SathuX?{" "}
         <Link href="/signup" className="font-medium text-primary underline-offset-4 hover:underline">
           Create an account
         </Link>

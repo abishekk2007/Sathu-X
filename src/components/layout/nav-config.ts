@@ -24,7 +24,7 @@ export const primaryNav: NavItem[] = [
     title: "Chat",
     href: "/chat",
     icon: MessageSquareIcon,
-    description: "Talk to Spidey Bot",
+    description: "Talk to SathuX",
   },
   {
     title: "Student",
@@ -78,7 +78,7 @@ export const primaryNav: NavItem[] = [
     title: "Memory",
     href: "/memory",
     icon: BrainIcon,
-    description: "What Spidey Bot remembers",
+    description: "What SathuX remembers",
   },
 ];
 

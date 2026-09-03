@@ -25,7 +25,7 @@ export function SpideyLogo({
     <span className={cn("flex items-center gap-2.5", className)}>
       <SpideyLogo compact />
       <span className="text-[15px] leading-none font-semibold tracking-tight">
-        Spidey&nbsp;Bot
+        SathuX
       </span>
     </span>
   );

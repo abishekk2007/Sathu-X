@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { SpiderMark } from "@/components/branding/spider-mark";
 
 type ThinkingIndicatorProps = {
-  /** Custom loading copy; defaults to "Spidey Bot is thinking". */
+  /** Custom loading copy; defaults to "SathuX is thinking". */
   label?: string;
 };
 
@@ -15,7 +15,7 @@ export function ThinkingIndicator({ label }: ThinkingIndicatorProps) {
       <span className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
         <SpiderMark className="size-4" />
       </span>
-      <span>{label ?? "Spidey Bot is thinking"}</span>
+      <span>{label ?? "SathuX is thinking"}</span>
       <span className="flex gap-1">
         {[0, 1, 2].map((i) => (
           <motion.span

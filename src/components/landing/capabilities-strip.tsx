@@ -28,7 +28,7 @@ export function CapabilitiesStrip() {
       <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
         <FadeIn>
           <h2 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">
-            Everything Spidey Bot can do
+            Everything SathuX can do
           </h2>
         </FadeIn>
         <FadeIn delay={0.08}>

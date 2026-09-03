@@ -122,7 +122,7 @@ export function MemoryBoard() {
       ? await update(target.id, values)
       : await add(values);
     if (result === "secrets_not_allowed") {
-      toast.error("Spidey Bot can't store passwords or secrets.");
+      toast.error("SathuX can't store passwords or secrets.");
       return false;
     }
     if (result) {
@@ -140,8 +140,8 @@ export function MemoryBoard() {
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-6">
         <PageHeader
           icon={BrainIcon}
-          title="Spidey Memory"
-          description="What Spidey remembers about you."
+          title="SathuX Memory"
+          description="What SathuX remembers about you."
           actions={
             <>
               <Button
@@ -185,7 +185,7 @@ export function MemoryBoard() {
           >
             <PauseCircleIcon className="size-4 shrink-0" aria-hidden="true" />
             <span>
-              Memory is paused. Spidey Bot won&apos;t recall or save anything
+              Memory is paused. SathuX won&apos;t recall or save anything
               new until you resume it.
             </span>
           </section>
@@ -316,7 +316,7 @@ export function MemoryBoard() {
         )}
 
         <p className="rounded-xl border bg-muted/30 p-4 text-xs leading-relaxed text-muted-foreground">
-          Spidey Bot only uses memories to personalize replies — never to train
+          SathuX only uses memories to personalize replies — never to train
           models, and never to store passwords or secrets. Deleting a memory
           removes it permanently.
         </p>
@@ -361,7 +361,7 @@ export function MemoryBoard() {
         open={clearAllOpen}
         onOpenChange={setClearAllOpen}
         title="Clear all memories?"
-        description="Are you sure? This will permanently delete all memories. Spidey Bot will no longer know any of these facts."
+        description="Are you sure? This will permanently delete all memories. SathuX will no longer know any of these facts."
         confirmLabel="Delete all memories"
         destructive
         onConfirm={async () => {
@@ -458,7 +458,7 @@ function MemoryDialog({
   const handleSubmit = async () => {
     const trimmed = content.trim();
     if (!trimmed) {
-      setValidationError("Please enter what Spidey should remember.");
+      setValidationError("Please enter what SathuX should remember.");
       return;
     }
     if (trimmed.length > 500) {
@@ -481,7 +481,7 @@ function MemoryDialog({
         <DialogHeader>
           <DialogTitle>{initial ? "Edit memory" : "Add memory"}</DialogTitle>
           <DialogDescription>
-            What should Spidey remember? It will use this in future chats.
+            What should SathuX remember? It will use this in future chats.
           </DialogDescription>
         </DialogHeader>
 

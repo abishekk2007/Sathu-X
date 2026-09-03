@@ -331,7 +331,7 @@ export function StudentView() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-sm text-muted-foreground">
                 <LightbulbIcon className="size-4 text-primary" />
-                Spidey insights
+                SathuX insights
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5">

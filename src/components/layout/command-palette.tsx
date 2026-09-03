@@ -128,7 +128,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       <CommandDialog
         open={open}
         onOpenChange={setOpen}
-        title="Search Spidey Bot"
+        title="Search SathuX"
         description="Search chats, documents, tasks and memories, or jump to a page."
       >
         <CommandInput placeholder="Search or jump to..." />

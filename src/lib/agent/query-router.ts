@@ -108,6 +108,8 @@ import {
   type TaskIntentResult,
   type PlanIntentResult,
 } from "@/lib/tasks";
+import { shouldResearch, detectWebImageRequest } from "@/lib/web-research/detect";
+import { detectImageWebSearchIntent } from "@/lib/web-research/image-intent";
 
 // ---------------------------------------------------------------------------
 // Route taxonomy (future tools are declared, never activated)
@@ -131,7 +133,8 @@ export type QueryRoute =
   | "DOCUMENT_VISUAL_GENERATION"
   | "TASK_MANAGEMENT"
   | "TASK_QUERY"
-  | "PLAN_GENERATION";
+  | "PLAN_GENERATION"
+  | "WEB_RESEARCH";
 
 /**
  * Future capability slots. Declared for forward compatibility of the route
@@ -142,7 +145,7 @@ export const EXTENSION_POINTS = {
   IMAGE_GENERATION: true,
   IMAGE_EDITING: true,
   DOCUMENT_VISUAL_GENERATION: true,
-  WEB_SEARCH: false,
+  WEB_SEARCH: true,
   VOICE: false,
   TASK: true,
   MEMORY: false,
@@ -152,7 +155,7 @@ export type ConfidenceLabel = "high" | "medium" | "low";
 
 export interface ExecutionStep {
   id: string;
-  kind: "realtime" | "rag" | "visual" | "gemini" | "image";
+  kind: "realtime" | "rag" | "visual" | "gemini" | "image" | "web";
   /** Step ids this step depends on (a cycle here is a router bug). */
   dependsOn: string[];
   /** Upper bound on external calls for this step. */
@@ -183,6 +186,8 @@ export interface QueryRouteDecision {
   requiresGeneralReasoning: boolean;
   /** True when the turn is ambiguous and a concise clarification is wise. */
   requiresClarification: boolean;
+  /** Phase 7C: true when the turn should trigger web research. */
+  requiresWeb: boolean;
   /** Debug-only rationale. MUST never be exposed to the client. */
   reason: string;
   realtimeDecision?: RealtimeDecision;
@@ -634,6 +639,7 @@ function buildPlan(d: {
   requiresRealtime: boolean;
   requiresDocuments: boolean;
   requiresVisualEvidence: boolean;
+  requiresWeb?: boolean;
 }): ExecutionPlan {
   const steps: ExecutionStep[] = [];
   let index = 0;
@@ -655,6 +661,12 @@ function buildPlan(d: {
       dependsOn: [],
       maxCalls: d.requiresVisualEvidence ? 2 : 3,
     });
+    index += 1;
+  }
+  if (d.requiresWeb) {
+    // Bounded web research: ≤2 search calls (the search budget is enforced by
+    // the research engine itself; this is an upper-bound for the plan).
+    steps.push({ id: `step-${index}`, kind: "web", dependsOn: [], maxCalls: 2 });
     index += 1;
   }
   if (isImage) {
@@ -679,13 +691,14 @@ function buildPlan(d: {
 
   const realtimeSteps = steps.filter((s) => s.kind === "realtime").length;
   const retrievalSteps = steps.filter((s) => s.kind === "rag" || s.kind === "visual").length;
+  const webSteps = steps.filter((s) => s.kind === "web").length;
   // Every plan ends in one Gemini step; the bound covers total external calls
-  // (geocode/rate/DB retrieval + the LLM call) and stays well under the cap.
+  // (geocode/rate/DB retrieval + web search + the LLM call) and stays under cap.
   // Image turns: retrieval (+ ≤2 provider calls inside the service) + image call.
   const imageBudgetCap = isImage ? Math.min(realtimeSteps + retrievalSteps + 2, 4) : 0;
   const totalExternal = isImage
     ? imageBudgetCap
-    : Math.min(realtimeSteps + retrievalSteps + 1, 4);
+    : Math.min(realtimeSteps + retrievalSteps + webSteps + 1, 5);
 
   return {
     steps,
@@ -708,6 +721,7 @@ interface DecisionParts {
   requiresVisualEvidence: boolean;
   requiresGeneralReasoning: boolean;
   requiresClarification: boolean;
+  requiresWeb?: boolean;
   reason: string;
   realtimeDecision?: RealtimeDecision;
   domainDecision?: DomainDecision;
@@ -727,7 +741,13 @@ interface DecisionParts {
 }
 
 function makeDecision(parts: DecisionParts): QueryRouteDecision {
-  const plan = buildPlan(parts);
+  const plan = buildPlan({
+    primaryRoute: parts.primaryRoute,
+    requiresRealtime: parts.requiresRealtime,
+    requiresDocuments: parts.requiresDocuments,
+    requiresVisualEvidence: parts.requiresVisualEvidence,
+    requiresWeb: parts.requiresWeb,
+  });
   const decision: QueryRouteDecision = {
     primaryRoute: parts.primaryRoute,
     routes: [...new Set(parts.routes)],
@@ -738,6 +758,7 @@ function makeDecision(parts: DecisionParts): QueryRouteDecision {
     requiresVisualEvidence: parts.requiresVisualEvidence,
     requiresGeneralReasoning: parts.requiresGeneralReasoning,
     requiresClarification: parts.requiresClarification,
+    requiresWeb: parts.requiresWeb ?? false,
     reason: parts.reason,
     executionPlan: plan,
   };
@@ -770,6 +791,14 @@ export function routeQuery(input: QueryRoutingInput): QueryRouteDecision {
   const visual = detectVisualIntent(message);
   const rt = detectRealtimeIntent({ message, hasSources });
   const docReferenced = referencesDocument(message);
+
+  // Phase 7F — is a FRESH camera/uploaded image riding with this turn? Only a
+  // fresh upload (key "upload") can turn a typed web phrase into an image+web
+  // research turn; older conversation image metadata never re-triggers web
+  // research on its own.
+  const hasUploadedImage = (input.images ?? []).some((img) => img.key === "upload");
+  const webImageRequest = detectWebImageRequest(message);
+  const imageWebRequest = hasUploadedImage && detectImageWebSearchIntent(message);
 
   // Phase 6C: text→image intent. Direct generation verbs first, then a
   // refinement of the PREVIOUS image turn ("draw a castle" → "make it at
@@ -1121,19 +1150,32 @@ export function routeQuery(input: QueryRoutingInput): QueryRouteDecision {
       });
     }
     const visualRoute = visual.type === "none" ? null : (visual.hasTextualAnalysis ? "MULTIMODAL" : "VISUAL");
+    // Phase 7D — a document-referenced question that ALSO carries a freshness
+    // signal ("…and what is the company's current revenue?", "…latest
+    // developments") is a genuine hybrid: RAG stays authoritative for the
+    // document, and a bounded web search runs in parallel for the current bit.
+    // A visual ask stays document-visual only — we never bolt web research
+    // onto a visual-document turn.
+    const hybridWeb = !visualRoute && shouldResearch(message, input.priorTurns ?? []);
+    const routes: QueryRoute[] = visualRoute
+      ? [visualRoute, "DOCUMENT_RAG"]
+      : hybridWeb
+        ? ["DOCUMENT_RAG", "WEB_RESEARCH"]
+        : ["DOCUMENT_RAG"];
     return makeDecision({
       primaryRoute: visualRoute ?? "DOCUMENT_RAG",
-      routes: visualRoute ? [visualRoute, "DOCUMENT_RAG"] : ["DOCUMENT_RAG"],
+      routes,
       confidence: structural || questionNumber ? 0.97 : 0.92,
       requiresDocuments: true,
       requiresRealtime: false,
       requiresVisualEvidence: visual.type !== "none",
       requiresGeneralReasoning: true,
       requiresClarification: false,
+      requiresWeb: hybridWeb,
       reason:
         `Document reference wins over real-time: ${
           rtProbe.handled ? `${rtProbe.intent} stands down (guard)` : "no real-time intent"
-        }.`,
+        }.${hybridWeb ? " Freshness signal present — bounded web research runs alongside RAG." : ""}`,
       visualIntent: visual.type !== "none" ? visual : undefined,
       queryAnalysis: analysis,
       multiSourceIntent,
@@ -1284,16 +1326,28 @@ export function routeQuery(input: QueryRoutingInput): QueryRouteDecision {
 
   // -- 10. Sources attached → document RAG ---------------------------------
   if (hasSources) {
+    // Phase 7D — a freshness signal alongside an attached document ("…and
+    // what is the latest…", "…current status…") makes this a genuine hybrid:
+    // the document remains the authoritative source for document claims (RAG),
+    // while a bounded web search supplies the current bit. Web-only and static
+    // doc questions are untouched (requiresWeb stays false).
+    const hybridWeb = shouldResearch(message, input.priorTurns ?? []);
+    const routes: QueryRoute[] = hybridWeb
+      ? ["DOCUMENT_RAG", "WEB_RESEARCH"]
+      : ["DOCUMENT_RAG"];
     return makeDecision({
       primaryRoute: "DOCUMENT_RAG",
-      routes: ["DOCUMENT_RAG"],
+      routes,
       confidence: structural || questionNumber ? 0.97 : 0.9,
       requiresDocuments: true,
       requiresRealtime: false,
       requiresVisualEvidence: false,
       requiresGeneralReasoning: true,
       requiresClarification: false,
-      reason: `Attached ${sourceCount} source(s); RAG retrieval is active.`,
+      requiresWeb: hybridWeb,
+      reason: `Attached ${sourceCount} source(s); RAG retrieval is active.${
+        hybridWeb ? " Freshness signal detected — bounded web research runs alongside RAG." : ""
+      }`,
       queryAnalysis: analysis,
       multiSourceIntent,
     });
@@ -1311,6 +1365,40 @@ export function routeQuery(input: QueryRoutingInput): QueryRouteDecision {
       requiresGeneralReasoning: true,
       requiresClarification: true,
       reason: "Bare deictic follow-up with no resolvable anchor — ask a concise clarification.",
+      queryAnalysis: analysis,
+    });
+  }
+
+  // -- Phase 7C: Web research (recency-driven) ---------------------------
+  // A freshness signal ("latest", "current", a recent year, "price of…",
+  // "today's news") routes here. Sits ABOVE plain GENERAL but BELOW every
+  // document/visual/real-time/task/image route, so capability-specific turns
+  // are never hijacked — web research only augments general knowledge asks.
+  //
+  // Phase 7F: two explicit INPUT-modal asks join this branch (they cannot be
+  // freshness-driven and are otherwise silent):
+  //   - "show me images of…" — an explicit web-image request (include_images
+  //     runs in researchWeb so the results grid renders).
+  //   - a fresh camera upload + a typed web phrase ("find this product
+  //     online", "what version is this device") — web research complements,
+  //     never replaces, the vision pipeline; the photo still flows through
+  //     Gemini as visual input.
+  if (shouldResearch(message, input.priorTurns ?? []) || webImageRequest || imageWebRequest) {
+    const triggers: string[] = [];
+    if (shouldResearch(message, input.priorTurns ?? [])) triggers.push("Recency/freshness signal detected");
+    if (webImageRequest) triggers.push("Explicit web-image request");
+    if (imageWebRequest) triggers.push("Image + explicit web intent");
+    return makeDecision({
+      primaryRoute: "WEB_RESEARCH",
+      routes: ["WEB_RESEARCH", "GENERAL"],
+      confidence: 0.8,
+      requiresDocuments: false,
+      requiresRealtime: false,
+      requiresVisualEvidence: false,
+      requiresGeneralReasoning: true,
+      requiresClarification: false,
+      requiresWeb: true,
+      reason: `${triggers.join("; ")} — a bounded web search precedes the grounded Gemini answer.`,
       queryAnalysis: analysis,
     });
   }
@@ -1348,5 +1436,6 @@ export function describeQueryRoute(d: QueryRouteDecision): string {
     `dv=${d.documentVisualIntent ? "1" : "0"}`,
     `task=${d.taskIntent ? d.taskIntent.intent : "0"}`,
     `plan=${d.planIntent ? d.planIntent.intent : "0"}`,
+    `web=${d.requiresWeb ? "1" : "0"}`,
   ].join(" ");
 }

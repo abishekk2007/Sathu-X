@@ -57,6 +57,93 @@ export interface ChatImageContextItem {
   height?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 7C — web research citations
+// ---------------------------------------------------------------------------
+
+/**
+ * Phase 7C — a single citation the app surfaced for a web-researched answer.
+ */
+export interface ChatSource {
+  /** 1-based citation number shown in the UI. */
+  index: number;
+  title: string;
+  url: string;
+  domain: string;
+  /** Best-effort publication date (YYYY-MM-DD) when the provider reported one. */
+  publishedAt: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7F — web image results + shared location
+// ---------------------------------------------------------------------------
+
+/**
+ * A web image surfaced by an image search ("show me images of…"). App-owned
+ * https URLs from the server control frame — never model-invented. Rendered in
+ * a dedicated grid that stays visually distinct from generated/camera images.
+ */
+export interface ChatWebImage {
+  url: string;
+  title?: string;
+  description?: string;
+}
+
+/**
+ * A coarse location the user shared deliberately via the composer pin. Only
+ * the rounded (~1.1 km) coords ever leave the browser; the raw GPS reading is
+ * discarded inside `sanitizeUserLocation`.
+ */
+export interface ChatSharedLocation {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+}
+
+/**
+ * A normalised place result for rendering on a Leaflet map. Coordinates are
+ * always validated — entries without valid coordinates are filtered out before
+ * reaching the UI. `openInGoogleMaps` is an app-built link, never model-invented.
+ */
+export interface MapPlace {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  category?: string;
+  address?: string;
+  distanceMeters?: number;
+  sourceUrl?: string;
+  openInGoogleMaps?: string;
+}
+
+/**
+ * Phase 7D — a single document citation surfaced for a document-grounded
+ * (or hybrid) answer. App-owned metadata derived from the real retrieval
+ * results — never model-invented. No URL: these point at the user's uploaded
+ * documents, identified by source name (+ best-effort page number).
+ */
+export interface ChatDocumentCitation {
+  /** Document / source id the passage came from. */
+  sourceId: string;
+  /** Human-readable document / source name. */
+  sourceName: string;
+  /** Best-effort page number when the retrieved passage carried one. */
+  page: number | null;
+}
+
+// Phase 7E — camera-captured image attached to a USER message. The data URL
+// is a normalized, bounded JPEG produced client-side and validated server-side
+// before the assistant ever depends on it.
+export interface ChatUserImageAttachment {
+  dataUrl: string;
+  mimeType: string;
+  name: string;
+  width?: number;
+  height?: number;
+  fileSizeBytes?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -65,6 +152,25 @@ export interface ChatMessage {
   status?: MessageStatus;
   /** Present only on assistant messages that carry a generated image. */
   image?: ChatImageAttachment;
+  /** Phase 7E — camera-captured image attached to a user message. */
+  userImage?: ChatUserImageAttachment;
+  /** Phase 7C — real web-research citations (from application data, never
+   *  model-invented). Present only on web-researched assistant messages. */
+  sources?: ChatSource[];
+  /** Phase 7D — real document citations for a document-grounded or hybrid
+   *  answer (from application data, never model-invented). */
+  documentCitations?: ChatDocumentCitation[];
+  /** Phase 7C — true when research partially failed or returned no usable
+   *  sources; the answer then does not claim to be web-verified. */
+  researchDegraded?: boolean;
+  /** Phase 7F — real web image results (from application data, never
+   *  model-invented). Present only on image-search assistant messages. */
+  webImages?: ChatWebImage[];
+  /** Phase 7F — coarse location the user shared with this user message. */
+  userLocation?: ChatSharedLocation;
+  /** Phase 8 — real nearby places fetched from Nominatim for this assistant
+   *  message's location context. Never model-invented. */
+  places?: MapPlace[];
 }
 
 export type LegacyDocumentStatus = "ready" | "processing" | "failed";

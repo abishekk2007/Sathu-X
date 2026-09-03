@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Deno Edge Functions run outside the Next.js toolchain.
+    "supabase/functions/**",
+    // Archived full-project snapshot (serves earlier-phase test reporting).
+    // Its own tooling output and `.env*` secrets must never be linted.
+    "supabase/migrations/spidey-bot/**",
   ]),
 ]);
 

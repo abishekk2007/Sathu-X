@@ -1,0 +1,10 @@
+# Sathux Spidey Bot — Supabase CLI configuration
+# Generated manually for the welcome-email Edge Function.
+# Local project id (used by `supabase start`); unrelated to the remote ref.
+
+project_id = "sathux-spidey-bot"
+
+[functions.welcome-email]
+# Require a valid signed-in user JWT to invoke. Server-to-server calls from
+# the Next.js callback send the user's access token (RLS-scoped owner access).
+verify_jwt = true

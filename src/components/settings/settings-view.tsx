@@ -57,7 +57,7 @@ export function SettingsView() {
         <PageHeader
           icon={SettingsIcon}
           title="Settings"
-          description="Tune Spidey Bot to work the way you do."
+          description="Tune SathuX to work the way you do."
         />
 
         <Tabs
@@ -115,14 +115,14 @@ export function SettingsView() {
             </TabsContent>
 
             <TabsContent value="memory" className="space-y-5">
-              <SettingsSection title="Memory" description="What Spidey Bot remembers between chats.">
+              <SettingsSection title="Memory" description="What SathuX remembers between chats.">
                 <div className="rounded-xl border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground">
-                  When you ask Spidey Bot to remember something — &ldquo;Remember that I
+                  When you ask SathuX to remember something — &ldquo;Remember that I
                   prefer concise explanations&rdquo; — it saves that fact for future
                   chats. Nothing else is stored, secrets are never kept, and you can
                   review or delete everything in{" "}
                   <Link href="/memory" className="font-medium text-primary underline-offset-4 hover:underline">
-                    Spidey Memory
+                    SathuX Memory
                   </Link>
                   .
                 </div>

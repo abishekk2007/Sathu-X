@@ -103,7 +103,7 @@ export function PlanGenerateDialog({
             {regeneratePlanId ? "Regenerate study plan" : "Generate study plan"}
           </DialogTitle>
           <DialogDescription>
-            Spidey builds a schedule around your upcoming exams and weakest
+            SathuX builds a schedule around your upcoming exams and weakest
             topics. You can adjust any session afterwards.
           </DialogDescription>
         </DialogHeader>

@@ -38,7 +38,7 @@ export { detectMemoryIntent, isMemoryCommand } from "./intent";
 export { evaluateSave, evaluateRecall, evaluateDelete } from "./policy";
 export type { PolicyDecision, SaveContext } from "./policy";
 
-export { looksSensitive, sanitizeForLog, describeMemoryForLog } from "./security";
+export { looksSensitive, sanitizeForLog, describeMemoryForLog, looksLikeRawLocation } from "./security";
 
 export {
   parseMemoryCandidate,
@@ -67,3 +67,13 @@ export {
 export { retrieveRelevantMemories, rankMemories, tokenize, TYPE_SIGNAL_WORDS } from "./retrieval";
 
 export { buildMemoryContextBlock, summarizeMemories } from "./context";
+
+// Phase 8D — memory candidate model + deterministic screening.
+export {
+  screenMemoryCandidate,
+  isConversationDump,
+  looksLikeReasoning,
+  containsPromptInjection,
+  neutralizePromptInjection,
+} from "./candidate";
+export type { CandidateVerdict, ScreenedCandidate } from "./candidate";

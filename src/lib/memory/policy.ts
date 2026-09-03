@@ -15,11 +15,12 @@
 // ---------------------------------------------------------------------------
 
 import type { $UserMemory, MemorySource } from "./types";
-import { looksSensitive } from "./security";
+import { looksSensitive, looksLikeRawLocation } from "./security";
 
 export type PolicyDecision =
   | { action: "allow"; reason: "explicit_write" }
   | { action: "deny"; reason: "secret"; scope: "value" }
+  | { action: "deny"; reason: "raw_location"; scope: "value" }
   | { action: "deny"; reason: "memory_disabled" }
   | { action: "deny"; reason: "no_match" }
   | { action: "deny"; reason: "preserve_explicit"; existingId: string }
@@ -54,6 +55,12 @@ export function evaluateSave(input: {
   // under an explicit request.
   if (looksSensitive(content)) {
     return { action: "deny", reason: "secret", scope: "value" };
+  }
+
+  // Phase 8D — raw coordinates are personal-location PII and are never
+  // persisted verbatim, even on an explicit "remember my location".
+  if (looksLikeRawLocation(content)) {
+    return { action: "deny", reason: "raw_location", scope: "value" };
   }
 
   if (!content) {

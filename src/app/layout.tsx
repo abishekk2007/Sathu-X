@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Spidey Bot — Your AI. Your Study Partner. Your Personal Assistant.",
-    template: "%s · Spidey Bot",
+    default: "SathuX — Your AI. Your Study Partner. Your Personal Assistant.",
+    template: "%s · SathuX",
   },
   description:
     "One AI for conversations, studying, productivity, and everything in between.",

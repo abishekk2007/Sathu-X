@@ -30,7 +30,7 @@ export function StudentSection() {
             </h2>
             <p className="mt-3 max-w-lg text-muted-foreground">
               Notes become summaries, summaries become quizzes, quizzes become
-              confidence. Spidey Bot tracks every subject so revision always
+              confidence. SathuX tracks every subject so revision always
               starts in the right place.
             </p>
 

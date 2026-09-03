@@ -209,7 +209,7 @@ function CreateReminderDialog({
       <DialogContent className="sm:max-w-md" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Add reminder</DialogTitle>
-          <DialogDescription>Spidey Bot will nudge you on time.</DialogDescription>
+          <DialogDescription>SathuX will nudge you on time.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-1">

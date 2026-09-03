@@ -487,8 +487,9 @@ section("G. Transparency & extension points");
   );
   // Phase 6C activates IMAGE_GENERATION. Phase 6D adds IMAGE_EDITING.
   // Phase 6E adds DOCUMENT_VISUAL_GENERATION. Phase 6G adds TASK (chat-backed
-  // task/planning commands). Every other extension slot stays declared-but-
-  // inert (a future phase may light one up).
+  // task/planning commands). Phase 7C activates WEB_SEARCH (web research).
+  // Every other extension slot stays declared-but-inert (a future phase may
+  // light one up).
   assertEqual(EXTENSION_POINTS.IMAGE_GENERATION, true, "G7 IMAGE_GENERATION activated in 6C");
   assertEqual(EXTENSION_POINTS.IMAGE_EDITING, true, "G7 IMAGE_EDITING activated in 6D");
   assertEqual(
@@ -501,6 +502,7 @@ section("G. Transparency & extension points");
     true,
     "G7 TASK activated in 6G (task/planning commands)"
   );
+  assertEqual(EXTENSION_POINTS.WEB_SEARCH, true, "G7 WEB_SEARCH activated in 7C");
   assert(
     Object.entries(EXTENSION_POINTS)
       .filter(
@@ -508,7 +510,8 @@ section("G. Transparency & extension points");
           name !== "IMAGE_GENERATION" &&
           name !== "IMAGE_EDITING" &&
           name !== "DOCUMENT_VISUAL_GENERATION" &&
-          name !== "TASK"
+          name !== "TASK" &&
+          name !== "WEB_SEARCH"
       )
       .every(([, v]) => v === false),
     "G7 the other extension points stay declared but inert"

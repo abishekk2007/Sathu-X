@@ -55,14 +55,14 @@ export function AuthShell({
         </div>
 
         <p className="relative text-xs text-muted-foreground/70">
-          © {new Date().getFullYear()} Spidey Bot
+          © {new Date().getFullYear()} SathuX
         </p>
       </aside>
 
       {/* Form panel */}
       <main className="flex items-center justify-center px-4 py-12 sm:px-8">
         <div className="w-full max-w-sm">
-          <Link href="/" className="mb-8 inline-flex lg:hidden" aria-label="Spidey Bot home">
+          <Link href="/" className="mb-8 inline-flex lg:hidden" aria-label="SathuX home">
             <SpideyLogo />
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>

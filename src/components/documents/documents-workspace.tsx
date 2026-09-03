@@ -78,7 +78,7 @@ export function DocumentsWorkspace() {
         <PageHeader
           icon={FileTextIcon}
           title="Your Documents"
-          description="Upload study materials to use them with Spidey later."
+          description="Upload study materials to use them with SathuX later."
           actions={
             <Button size="sm" onClick={() => setUploadOpen(true)}>
               <UploadCloudIcon data-icon="inline-start" />

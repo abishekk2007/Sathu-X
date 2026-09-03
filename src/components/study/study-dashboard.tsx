@@ -30,7 +30,7 @@ export function StudyDashboard() {
     <div className="h-full overflow-y-auto scrollbar-slim">
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6">
         <PageHeader
-          title="Study with Spidey"
+          title="Study with SathuX"
           description="Turn your study material into understanding."
         />
 

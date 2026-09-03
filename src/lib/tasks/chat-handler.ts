@@ -58,7 +58,7 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
 };
 
 const NO_PUSH_NOTE =
-  "(Reminder mode) — Spidey surfaces due tasks when you ask 'show my tasks'; no push notification exists in this version, so check the tasks board for the due list.";
+  "(Reminder mode) — SathuX surfaces due tasks when you ask 'show my tasks'; no push notification exists in this version, so check the tasks board for the due list.";
 
 function formatDue(dueAt: string | null, timezone?: string): string {
   if (!dueAt) return "no due date";

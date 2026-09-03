@@ -363,7 +363,7 @@ export const mockReminders: Reminder[] = [
   },
   {
     id: "r5",
-    title: "Weekly plan with Spidey Bot",
+    title: "Weekly plan with SathuX",
     dayLabel: "Sun, Aug 23",
     timeLabel: "10:00 AM",
     completed: true,

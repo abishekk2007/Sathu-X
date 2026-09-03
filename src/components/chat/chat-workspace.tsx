@@ -38,6 +38,7 @@ import { EmptyChatState } from "@/components/chat/empty-chat-state";
 import { ThinkingIndicator } from "@/components/chat/thinking-indicator";
 import { UserMessage } from "@/components/chat/user-message";
 import { useChatStudyTracking } from "@/hooks/use-chat-study-tracking";
+import { useSpeechSynthesis } from "@/hooks/use-speech-synthesis";
 import { useCommandPalette } from "@/components/layout/command-palette";
 import { NotificationsPopover } from "@/components/layout/notifications-popover";
 import { mockModes } from "@/data/mock";
@@ -48,12 +49,25 @@ import {
 } from "@/lib/supabase/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { publishConversations } from "@/lib/conversation-store";
+import { hasFreshnessSignal } from "@/lib/web-research/detect";
+import {
+  parseSourcesControlFrame,
+  parseHybridControlFrame,
+  stripControlFrame,
+} from "@/lib/web-research/evidence";
+import { fetchNearbyPlaces } from "@/lib/map-fetch";
+import { derivePlaceQuery } from "@/lib/map-utils";
 import type {
   AiMode,
   ChatContextSelection,
+  ChatDocumentCitation,
   ChatImageAttachment,
   ChatImageContextItem,
   ChatMessage,
+  ChatSharedLocation,
+  ChatSource,
+  ChatUserImageAttachment,
+  ChatWebImage,
   Conversation,
 } from "@/types";
 import { cn } from "@/lib/utils";
@@ -93,6 +107,25 @@ function isAwaitingImageEdit(messages: ChatMessage[], index: number) {
     .some((m) => m.role === "assistant" && Boolean(m.image));
   if (!hasImage) return false;
   return IMAGE_EDIT_THINK_RE.test(prior.content.trim());
+}
+
+/**
+ * Phase 7C — cosmetic thinking label for web-research turns. Cosmetic only:
+ * the server owns the real WEB_RESEARCH decision. Uses the same deterministic
+ * freshness signal the router uses so the label matches what the server will do.
+ */
+function isAwaitingWebResearch(messages: ChatMessage[], index: number) {
+  const prior = messages[index - 1];
+  if (!prior || prior.role !== "user") return false;
+  const priorTurns = messages
+    .slice(0, Math.max(0, index - 1))
+    .filter((m) => m.role === "user")
+    .map((m) => ({ role: "user" as const, content: m.content }));
+  return hasFreshnessSignal(prior.content) ||
+    (prior.content.trim().length <= 80 &&
+      prior.content.trim().length > 0 &&
+      priorTurns.length > 0 &&
+      hasFreshnessSignal(priorTurns[priorTurns.length - 1].content));
 }
 
 /**
@@ -207,6 +240,15 @@ export function ChatWorkspace() {
     topicId: contextSelection.topicId ?? null,
     conversationId: activeId,
   });
+
+  // ---- Voice output (Phase 7B) — centralized single-speaker controller -----
+  // Lives here (the shared ancestor of every AssistantMessage) so only one
+  // response speaks at a time and switching/deleting conversations stops
+  // speech.
+  const speech = useSpeechSynthesis();
+  // `stop` is a stable callback (hook-level useCallback), so depending on it
+  // below never re-creates the selection callbacks.
+  const { stop: stopSpeech } = speech;
 
   const demoTimer = React.useRef<number | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
@@ -331,12 +373,13 @@ export function ChatWorkspace() {
   /** Sidebar selection: switch + lazily hydrate messages + sync mode. */
   const selectConversation = React.useCallback(
     (id: string) => {
+      stopSpeech();
       setActiveId(id);
       const match = conversations.find((conversation) => conversation.id === id);
       if (match) setMode(match.mode);
       void loadMessages(id);
     },
-    [conversations, loadMessages]
+    [conversations, loadMessages, stopSpeech]
   );
 
   /**
@@ -397,10 +440,11 @@ export function ChatWorkspace() {
   );
 
   const startNewChat = React.useCallback(() => {
+    stopSpeech();
     // Pure UI state — NO database row until the first message is sent.
     setActiveId(null);
     window.history.replaceState(null, "", "/chat?new=1");
-  }, []);
+  }, [stopSpeech]);
 
   /**
    * Keeps selection in sync with the URL so sidebar "+"/deep links/back-forward
@@ -462,7 +506,12 @@ export function ChatWorkspace() {
     async (
       conversationId: string,
       messageId: string,
-      history: ChatMessage[]
+      history: ChatMessage[],
+      cameraImage?: ChatUserImageAttachment | null,
+      /** Phase 7F — coarse location shared live with this turn. */
+      location?: ChatSharedLocation | null,
+      /** Phase 8A — how the turn arrived ("text" | "voice"). */
+      inputModality?: "text" | "voice"
     ) => {
       updateMessage(conversationId, messageId, {
         status: "thinking",
@@ -491,6 +540,13 @@ export function ChatWorkspace() {
           .reverse()
           .find((m) => m.role === "assistant" && m.image);
 
+        // Phase 7F — location (if shared) travels via the explicit turn arg,
+        // falling back to the last user message that carried one, so a
+        // regenerate/stop-retry still sees the shared coordinates.
+        const locationFromHistory = location ??
+          [...windowed].reverse().find((m) => m.role === "user" && m.userLocation)
+            ?.userLocation;
+
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -517,6 +573,28 @@ export function ChatWorkspace() {
                   mimeType: lastImageMessage.image.mimeType,
                 }
               : undefined,
+            // Phase 7E — camera-captured photo (normalized + validated). The
+            // camera image is a transient inline input to the Gemini vision
+            // pipeline; it is never stored, never sent to Tavily, never logged.
+            uploadedImage: cameraImage
+              ? {
+                  dataUrl: cameraImage.dataUrl,
+                  mimeType: cameraImage.mimeType,
+                  name: cameraImage.name,
+                }
+              : undefined,
+            // Phase 7F — coarse user-shared location (input hint, never stored
+            // in the DB, never logged). The server re-validates + re-rounds it.
+            location: locationFromHistory ? {
+              latitude: locationFromHistory.latitude,
+              longitude: locationFromHistory.longitude,
+              ...(locationFromHistory.accuracy != null
+                ? { accuracy: locationFromHistory.accuracy }
+                : {}),
+            } : undefined,
+            // Phase 8A — the turn's modality so the Agent Controller can
+            // classify VOICE turns without guessing (never stored, never logged).
+            inputModality,
           }),
           signal: controller.signal,
         });
@@ -561,31 +639,105 @@ export function ChatWorkspace() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let received = "";
+        // Phase 7C/7D — sources arrive as a control frame at the head of the
+        // stream (either the 7C web frame or the 7D hybrid document+web frame);
+        // parse it once then strip it so it never shows as prose. Phase 7F:
+        // the same frame also carries web images for image-search turns.
+        let parsedSources: ChatSource[] | undefined;
+        let researchDegraded: boolean | undefined;
+        let parsedDocumentCitations: ChatDocumentCitation[] | undefined;
+        let parsedWebImages: ChatWebImage[] | undefined;
+
+        const applyFrame = (text: string) => {
+          const parsed = parseSourcesControlFrame(text);
+          if (parsed) {
+            parsedSources = parsed.sources;
+            researchDegraded = parsed.degraded;
+            if (parsed.images.length > 0) parsedWebImages = parsed.images;
+          }
+          const hybrid = parseHybridControlFrame(text);
+          if (hybrid) {
+            parsedSources = hybrid.webSources;
+            researchDegraded = hybrid.degraded;
+            parsedDocumentCitations = hybrid.documentCitations;
+            if (hybrid.images.length > 0) parsedWebImages = hybrid.images;
+          }
+          return stripControlFrame(text);
+        };
 
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
           received += decoder.decode(value, { stream: true });
-          streamingRef.current.content = received;
+          const clean = applyFrame(received);
+          streamingRef.current.content = clean;
           updateMessage(conversationId, messageId, {
-            content: received,
+            content: clean,
             status: "streaming",
+            ...(parsedSources && parsedSources.length > 0
+              ? { sources: parsedSources }
+              : {}),
+            ...(parsedDocumentCitations && parsedDocumentCitations.length > 0
+              ? { documentCitations: parsedDocumentCitations }
+              : {}),
+            ...(parsedWebImages && parsedWebImages.length > 0
+              ? { webImages: parsedWebImages }
+              : {}),
+            ...(researchDegraded !== undefined ? { researchDegraded } : {}),
           });
         }
 
         received += decoder.decode();
+        const cleanReceived = applyFrame(received);
 
-        if (received) {
+        if (cleanReceived) {
           updateMessage(conversationId, messageId, {
-            content: received,
+            content: cleanReceived,
             status: "complete",
+            ...(parsedSources && parsedSources.length > 0
+              ? { sources: parsedSources }
+              : {}),
+            ...(parsedDocumentCitations && parsedDocumentCitations.length > 0
+              ? { documentCitations: parsedDocumentCitations }
+              : {}),
+            ...(parsedWebImages && parsedWebImages.length > 0
+              ? { webImages: parsedWebImages }
+              : {}),
+            ...(researchDegraded !== undefined ? { researchDegraded } : {}),
+            ...(locationFromHistory ? { userLocation: locationFromHistory } : {}),
           });
+
+          // Phase 8 — place markers. When the user shared a real location AND
+          // the message is a "find X near me" query, geocode the place noun via
+          // the server-side Nominatim forwarder and attach the real results to
+          // this assistant message. Failed/location-less searches are silent —
+          // the map still shows the user marker from `userLocation`.
+          const latestUser = [...windowed].reverse().find((m) => m.role === "user");
+          const placeQuery =
+            latestUser && locationFromHistory
+              ? derivePlaceQuery(latestUser.content)
+              : null;
+          if (placeQuery) {
+            const geo = await fetchNearbyPlaces(placeQuery, locationFromHistory, 6);
+            if (geo.ok && geo.places.length > 0) {
+              updateMessage(conversationId, messageId, { places: geo.places });
+            }
+          }
           await saveAssistantMessage(conversationId, {
             id: messageId,
             role: "assistant",
-            content: received,
+            content: cleanReceived,
             timeLabel: nowLabel(),
             status: "complete",
+            ...(parsedSources && parsedSources.length > 0
+              ? { sources: parsedSources }
+              : {}),
+            ...(parsedDocumentCitations && parsedDocumentCitations.length > 0
+              ? { documentCitations: parsedDocumentCitations }
+              : {}),
+            ...(parsedWebImages && parsedWebImages.length > 0
+              ? { webImages: parsedWebImages }
+              : {}),
           });
           // Notify chat study tracker that the assistant replied.
           markStudyActivity();
@@ -611,7 +763,10 @@ export function ChatWorkspace() {
   const appendAssistantTurn = (
     conversationId: string,
     history: ChatMessage[],
-    existingMessageId?: string
+    existingMessageId?: string,
+    cameraImage?: ChatUserImageAttachment | null,
+    location?: ChatSharedLocation | null,
+    inputModality?: "text" | "voice"
   ) => {
     const messageId = existingMessageId ?? crypto.randomUUID();
     if (!existingMessageId) {
@@ -629,10 +784,15 @@ export function ChatWorkspace() {
         ],
       }));
     }
-    void runCompletion(conversationId, messageId, history);
+    void runCompletion(conversationId, messageId, history, cameraImage, location, inputModality);
   };
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (
+    text: string,
+    cameraImage?: ChatUserImageAttachment | null,
+    location?: ChatSharedLocation | null,
+    inputModality?: "text" | "voice"
+  ) => {
     if (sendingRef.current || !text.trim()) return;
     sendingRef.current = true;
 
@@ -674,6 +834,10 @@ export function ChatWorkspace() {
         role: "user",
         content: text,
         timeLabel: nowLabel(),
+        ...(cameraImage ? { userImage: cameraImage } : {}),
+        // Phase 7F — transient UI marker of the shared (coarse) location; kept
+        // out of the DB (schema untouched) and out of any log.
+        ...(location ? { userLocation: location } : {}),
       };
 
       const targetId = conversationId as string;
@@ -699,7 +863,7 @@ export function ChatWorkspace() {
       }
 
       touchConversation(targetId);
-      appendAssistantTurn(targetId, history);
+      appendAssistantTurn(targetId, history, undefined, cameraImage, location, inputModality);
       // Notify chat study tracker of activity.
       markStudyActivity();
     } finally {
@@ -783,6 +947,7 @@ export function ChatWorkspace() {
   };
 
   const handleDelete = (id: string) => {
+    stopSpeech();
     cancelPendingWork();
     setConversations((items) => items.filter((conversation) => conversation.id !== id));
     setMessagesById((byId) => {
@@ -1013,16 +1178,19 @@ export function ChatWorkspace() {
                     key={message.id}
                     label={
                       isAwaitingImageEdit(activeMessages, index)
-                        ? "Spidey Bot is editing the image"
+                        ? "SathuX is editing the image"
                         : isAwaitingImage(activeMessages, index)
-                          ? "Spidey Bot is generating an image"
-                          : undefined
+                          ? "SathuX is generating an image"
+                          : isAwaitingWebResearch(activeMessages, index)
+                            ? "SathuX is searching the web"
+                            : undefined
                     }
                   />
                 ) : (
                   <AssistantMessage
                     key={message.id}
                     message={message}
+                    speech={speech}
                     feedback={feedback[message.id]}
                     onFeedback={(value) => handleFeedback(message.id, value)}
                     onRegenerate={() => handleRegenerate(message.id)}

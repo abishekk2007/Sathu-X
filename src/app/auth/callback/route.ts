@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { createSupabaseRouteHandlerClient } from "@/lib/supabase/route-handler";
+import { enqueueWelcomeEmailForGoogleSignup } from "@/lib/supabase/welcome-email";
 
 /**
  * Supabase OAuth/PKCE callback. Exchanges the one-time ?code for a session
@@ -19,11 +20,18 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = await createSupabaseRouteHandlerClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
       console.error("OAuth exchange failed:", error.message);
       return NextResponse.redirect(new URL("/login?error=oauth", origin));
     }
+
+    // One-time welcome email for a FIRST Google signup. Bounded and
+    // fail-safe: never blocks or breaks the redirect below.
+    await enqueueWelcomeEmailForGoogleSignup(supabase, session);
   } catch (error) {
     console.error("OAuth callback error:", error);
     return NextResponse.redirect(new URL("/login?error=oauth", origin));

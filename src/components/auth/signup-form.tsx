@@ -170,7 +170,7 @@ export function SignupForm() {
 
     // Session present immediately when email confirmation is disabled.
     if (data.session) {
-      toast.success("Welcome to Spidey Bot!");
+      toast.success("Welcome to SathuX!");
       router.push("/chat");
       router.refresh();
       return;

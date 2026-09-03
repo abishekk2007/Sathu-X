@@ -191,7 +191,7 @@ function ProfileForm({
       <div>
         <h2 className="text-sm font-semibold">Profile</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          How Spidey Bot knows you — used to personalize replies.
+          How SathuX knows you — used to personalize replies.
         </p>
       </div>
 

@@ -33,7 +33,7 @@ const features = [
   {
     icon: BrainIcon,
     title: "Memory",
-    description: "Spidey Bot remembers what matters.",
+    description: "SathuX remembers what matters.",
   },
   {
     icon: MicIcon,
@@ -53,7 +53,7 @@ export function FeatureGrid() {
           </h2>
           <p className="mt-3 text-muted-foreground">
             From late-night study sessions to keeping life admin on track —
-            Spidey Bot switches roles so you don&apos;t have to switch apps.
+            SathuX switches roles so you don&apos;t have to switch apps.
           </p>
         </div>
       </FadeIn>
