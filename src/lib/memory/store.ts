@@ -40,6 +40,45 @@ interface MemoryRow {
   last_used_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Sanitized structured database-error logging.
+//
+// Surfaces the REAL Supabase/PostgREST error so the true cause of a memory
+// failure becomes observable in server logs — without echoing secrets, cookies,
+// tokens, keys, or full memory contents. Never exposes anything to the browser.
+// Fail-open behaviour is preserved: callers still return [] / null / error.
+// ---------------------------------------------------------------------------
+function logDbError(operation: string, table: string, error: unknown): void {
+  // Supabase errors carry { code, message, details, hint } and optionally a
+  // status. Extract only those safe, short fields.
+  const e = (error ?? {}) as {
+    code?: unknown;
+    message?: unknown;
+    details?: unknown;
+    hint?: unknown;
+    status?: unknown;
+  };
+  const sanitize = (v: unknown): string => {
+    if (v === undefined || v === null) return "";
+    return String(v).slice(0, 500);
+  };
+  // Only log the error's own field values (never request bodies or memory
+  // contents). These hold no secrets; tokens/keys never appear in PostgREST
+  // error fields. Apply looksSensitive as defense-in-depth regardless.
+  const message = sanitize(e.message);
+  const details = sanitize(e.details);
+  const hint = sanitize(e.hint);
+  console.error(
+    `[memory/store] db-error\n` +
+      `operation=${operation}\n` +
+      `table=${table}\n` +
+      `code=${sanitize(e.code)}\n` +
+      `message=${message}\n` +
+      `details=${details}\n` +
+      `hint=${hint}`
+  );
+}
+
 function mapRow(row: MemoryRow): $UserMemory {
   return {
     id: row.id,
@@ -121,12 +160,12 @@ export async function listMemories(
     if (opts?.enabledOnly) query = query.eq("enabled", true);
     const { data, error } = await query;
     if (error) {
-      console.error("[memory/store] listMemories select failed (RSL-scoped)");
+      logDbError("SELECT listMemories", "memories", error);
       return [];
     }
     return (data ?? []).map(mapRow);
-  } catch {
-    console.error("[memory/store] listMemories crashed");
+  } catch (e) {
+    logDbError("SELECT listMemories", "memories", e);
     return [];
   }
 }
@@ -144,10 +183,14 @@ export async function findMemoryByKey(
       .eq("key", key)
       .limit(1)
       .maybeSingle();
-    if (error || !data) return null;
+    if (error) {
+      logDbError("SELECT findMemoryByKey", "memories", error);
+      return null;
+    }
+    if (!data) return null;
     return mapRow(data as MemoryRow);
-  } catch {
-    console.error("[memory/store] findMemoryByKey crashed");
+  } catch (e) {
+    logDbError("SELECT findMemoryByKey", "memories", e);
     return null;
   }
 }
@@ -159,10 +202,14 @@ export async function isMemoryEnabled(supabase: SupabaseClient): Promise<boolean
       .from("profiles")
       .select("memory_enabled")
       .maybeSingle();
-    if (error || !data) return true;
+    if (error) {
+      logDbError("SELECT isMemoryEnabled", "profiles", error);
+      return true;
+    }
+    if (!data) return true;
     return data.memory_enabled !== false;
-  } catch {
-    console.error("[memory/store] isMemoryEnabled crashed");
+  } catch (e) {
+    logDbError("SELECT isMemoryEnabled", "profiles", e);
     return true;
   }
 }
@@ -178,12 +225,12 @@ export async function setMemoryMode(
       .update({ memory_enabled: enabled })
       .eq("memory_enabled", !enabled);
     if (error) {
-      console.error(`[memory/store] setMemoryMode update failed (enabled=${enabled})`);
+      logDbError("UPDATE setMemoryMode", "profiles", error);
       return false;
     }
     return true;
-  } catch {
-    console.error(`[memory/store] setMemoryMode crashed (enabled=${enabled})`);
+  } catch (e) {
+    logDbError("UPDATE setMemoryMode", "profiles", e);
     return false;
   }
 }
@@ -236,10 +283,11 @@ export async function upsertMemory(
           "id, key, content, memory_type, source, confidence, importance, enabled, created_at, updated_at, last_used_at"
         )
         .single();
-      if (error || !data) {
-        console.error("[memory/store] upsert key-merge failed");
+      if (error) {
+        logDbError("UPDATE upsertMemory key-merge", "memories", error);
         return { kind: "error" };
       }
+      if (!data) return { kind: "error" };
       console.log(`[memory/store] upsert merged memory ${describeMemoryForLog(mapRow(data as MemoryRow))}`);
       return { kind: "updated", memory: mapRow(data as MemoryRow) };
     }
@@ -272,10 +320,11 @@ export async function upsertMemory(
           "id, key, content, memory_type, source, confidence, importance, enabled, created_at, updated_at, last_used_at"
         )
         .single();
-      if (error || !data) {
-        console.error("[memory/store] upsert similarity-merge failed");
+      if (error) {
+        logDbError("UPDATE upsertMemory similarity-merge", "memories", error);
         return { kind: "error" };
       }
+      if (!data) return { kind: "error" };
       console.log(`[memory/store] upsert merged similar memory ${describeMemoryForLog(mapRow(data as MemoryRow))}`);
       return { kind: "updated", memory: mapRow(data as MemoryRow) };
     }
@@ -297,14 +346,15 @@ export async function upsertMemory(
         "id, key, content, memory_type, source, confidence, importance, enabled, created_at, updated_at, last_used_at"
       )
       .single();
-    if (error || !data) {
-      console.error("[memory/store] upsert insert failed");
+    if (error) {
+      logDbError("INSERT upsertMemory", "memories", error);
       return { kind: "error" };
     }
+    if (!data) return { kind: "error" };
     console.log(`[memory/store] upsert created memory ${describeMemoryForLog(mapRow(data as MemoryRow))}`);
     return { kind: "created", memory: mapRow(data as MemoryRow) };
-  } catch {
-    console.error("[memory/store] upsert crashed");
+  } catch (e) {
+    logDbError("INSERT upsertMemory", "memories", e);
     return { kind: "error" };
   }
 }
@@ -338,10 +388,14 @@ export async function patchMemory(
         "id, key, content, memory_type, source, confidence, importance, enabled, created_at, updated_at, last_used_at"
       )
       .single();
-    if (error || !data) return null;
+    if (error) {
+      logDbError("UPDATE patchMemory", "memories", error);
+      return null;
+    }
+    if (!data) return null;
     return mapRow(data as MemoryRow);
-  } catch {
-    console.error("[memory/store] patchMemory crashed");
+  } catch (e) {
+    logDbError("UPDATE patchMemory", "memories", e);
     return null;
   }
 }
@@ -363,12 +417,12 @@ export async function deleteMemory(
       .in("id", ids.slice(0, 100))
       .select("id");
     if (error) {
-      console.error("[memory/store] deleteMemory failed");
+      logDbError("DELETE deleteMemory", "memories", error);
       return null;
     }
     return data?.length ?? 0;
-  } catch {
-    console.error("[memory/store] deleteMemory crashed");
+  } catch (e) {
+    logDbError("DELETE deleteMemory", "memories", e);
     return null;
   }
 }
@@ -384,12 +438,12 @@ export async function deleteAllMemories(supabase: SupabaseClient): Promise<numbe
       .gte("created_at", "1970-01-01T00:00:00.000Z")
       .select("id");
     if (error) {
-      console.error("[memory/store] deleteAllMemories failed");
+      logDbError("DELETE deleteAllMemories", "memories", error);
       return null;
     }
     return data?.length ?? 0;
-  } catch {
-    console.error("[memory/store] deleteAllMemories crashed");
+  } catch (e) {
+    logDbError("DELETE deleteAllMemories", "memories", e);
     return null;
   }
 }
@@ -401,8 +455,8 @@ export async function touchMemoryUsage(supabase: SupabaseClient, id: string): Pr
       .from("memories")
       .update({ last_used_at: new Date().toISOString() })
       .eq("id", id);
-  } catch {
-    /* analytics only — never affects chat */
+  } catch (e) {
+    logDbError("UPDATE touchMemoryUsage", "memories", e);
   }
 }
 
