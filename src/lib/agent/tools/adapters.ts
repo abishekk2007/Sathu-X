@@ -107,8 +107,8 @@ async function documentRetrieval(
   }
   const started = Date.now();
   try {
-    if (ctx.sourceCount > 1 && rt.orchestrateMultiSourceRetrieval) {
-      const multi = await rt.orchestrateMultiSourceRetrieval(
+    if (ctx.sourceCount > 1 && (rt.orchestrateMultiSourceRetrieval ?? realOrchestrateMultiSourceRetrieval)) {
+      const multi = await (rt.orchestrateMultiSourceRetrieval ?? realOrchestrateMultiSourceRetrieval)(
         ctx.retrievalMessage,
         rt.agentSources ?? [],
         rt.userId ?? ""
@@ -124,8 +124,8 @@ async function documentRetrieval(
         },
       }, { durationMs: Date.now() - started, source: "multi-source", count: multi.results.length });
     }
-    if (rt.retrieveAgentContext) {
-      const results = await rt.retrieveAgentContext(
+    if (rt.retrieveAgentContext ?? realRetrieveAgentContext) {
+      const results = await (rt.retrieveAgentContext ?? realRetrieveAgentContext)(
         {
           query: ctx.retrievalMessage,
           sources: rt.agentSources ?? [],
@@ -472,6 +472,12 @@ import {
   generateDocumentVisual as realGenerateDocumentVisual,
 } from "@/lib/image-generation";
 import { geocodePlaces as realGeocodePlaces } from "@/lib/map-geocode";
+import {
+  retrieveAgentContext as realRetrieveAgentContext,
+} from "../context";
+import {
+  orchestrateMultiSourceRetrieval as realOrchestrateMultiSourceRetrieval,
+} from "../multi-source";
 
 /** Builds and returns the closed adapter registry (idempotent). */
 export function buildAdapters(): AgentToolRegistry {
