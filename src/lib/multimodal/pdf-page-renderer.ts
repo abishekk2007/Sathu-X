@@ -127,8 +127,11 @@ export async function renderPdfPages(
 
         const pngBuffer = canvas.toBuffer("image/png");
         const fileSize = pngBuffer.length;
-        const width = viewport.width;
-        const height = viewport.height;
+        // PDF.js viewport dims are fractional (render-scale dependent); the
+        // visual_assets.width/height columns are INTEGER, so round up to the
+        // nearest pixel to avoid "invalid input syntax for type integer".
+        const width = Math.round(viewport.width);
+        const height = Math.round(viewport.height);
         const contentHash = createHash("sha256").update(pngBuffer).digest("hex");
         const storagePath = `${userId}/visual_assets/${documentId}/page_${i}.png`;
 
@@ -278,8 +281,10 @@ export async function renderPdfPage(
 
     const pngBuffer = canvas.toBuffer("image/png");
     const fileSize = pngBuffer.length;
-    const width = viewport.width;
-    const height = viewport.height;
+    // PDF.js viewport dims are fractional; round to whole pixels to satisfy
+    // the visual_assets.height/width INTEGER columns.
+    const width = Math.round(viewport.width);
+    const height = Math.round(viewport.height);
     const contentHash = createHash("sha256").update(pngBuffer).digest("hex");
     const storagePath = `${userId}/visual_assets/${documentId}/page_${pageNumber}.png`;
 
