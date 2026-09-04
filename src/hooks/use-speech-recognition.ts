@@ -149,8 +149,15 @@ export function useSpeechRecognition(
 
     let finalTranscript = "";
 
+    // Guard: only the CURRENT recognition session may mutate shared state.
+    // A stale session (one we aborted to restart) must not clobber the ref or
+    // flip `isListening` for the session that replaced it. Without this, the
+    // old session's async `onend` fires after a restart and nulls the ref of
+    // the live session — leaving the UI stuck and voice input unreliable.
+    const isCurrent = () => recognitionRef.current === recognition;
+
     recognition.onstart = () => {
-      if (mountedRef.current) {
+      if (mountedRef.current && isCurrent()) {
         setIsListening(true);
         setError(null);
         setInterimTranscript("");
@@ -173,7 +180,7 @@ export function useSpeechRecognition(
       if (finalized) {
         onFinalTranscriptRef.current?.(finalized);
       }
-      if (mountedRef.current) {
+      if (mountedRef.current && isCurrent()) {
         setTranscript(finalTranscript);
         setInterimTranscript(interim);
       }
@@ -184,17 +191,22 @@ export function useSpeechRecognition(
       if (event.error === "aborted") return;
 
       const message = speechErrorMessage(event.error);
-      if (mountedRef.current) {
+      if (mountedRef.current && isCurrent()) {
         setError(message);
         setIsListening(false);
+        setInterimTranscript("");
+        // Drop the dead session so a subsequent start()/stop() never acts on
+        // it. onend may not fire after certain errors (no-speech, network),
+        // which would otherwise leave a dangling ref.
+        recognitionRef.current = null;
       }
     };
 
     recognition.onend = () => {
-      if (mountedRef.current) {
+      if (mountedRef.current && isCurrent()) {
         setIsListening(false);
+        recognitionRef.current = null;
       }
-      recognitionRef.current = null;
     };
 
     recognitionRef.current = recognition;
