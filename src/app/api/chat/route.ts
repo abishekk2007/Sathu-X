@@ -104,6 +104,10 @@ import {
 } from "@/lib/cache";
 import { detectCreatorProfileQuestion } from "@/lib/app/profile";
 import {
+  analyzeLearningRequest,
+  buildSmartLearningInstruction,
+} from "@/lib/learning/smart-learning";
+import {
   generateImage,
   editImage,
   generateDocumentVisual,
@@ -994,6 +998,42 @@ export async function POST(request: Request) {
         "X-Accel-Buffering": "no",
       },
     });
+  }
+
+  // ---- Smart Learning Mode Interceptor -------------------------------------
+  // Deterministic detection of the learning-workflow surface (quiz, revision,
+  // adaptive explanation, clarifier answers, quiz-answer evaluation, weak-topic
+  // revision). Anything NOT clearly a learning intent falls through untouched,
+  // so normal chat behaves exactly as before. When matched, the turn still
+  // streams through the existing Gemini + RAG pipeline below — this interceptor
+  // only (a) streams a deterministic clarifier when preferences are missing and
+  // (b) attaches the Smart Learning instruction block to the system prompt.
+  const learningAnalysis = analyzeLearningRequest(
+    latestUserMessage,
+    messages.slice(0, -1),
+  );
+  let learningInstructionBlock: string | null = null;
+  if (learningAnalysis.intent !== "none") {
+    if (learningAnalysis.intent === "clarify" && learningAnalysis.clarifier) {
+      console.log(
+        `[api/chat] outcome=smart-learning clarify intent=${learningAnalysis.pendingIntent ?? "unknown"} elapsed=${Math.round(performance.now() - t0)}ms`
+      );
+      const encoder = new TextEncoder();
+      const readable = new ReadableStream<Uint8Array>({
+        start(gc) {
+          gc.enqueue(encoder.encode(learningAnalysis.clarifier as string));
+          gc.close();
+        },
+      });
+      return new Response(readable, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+    learningInstructionBlock = buildSmartLearningInstruction(learningAnalysis);
   }
 
   // ---- Phase 8A: Agent Controller -----------------------------------------
@@ -2042,6 +2082,13 @@ export async function POST(request: Request) {
     console.log(
       `[api/chat] outcome=web-research sources=${research.sources.length} degraded=${research.degraded} status=${research.status} elapsed=${Math.round(performance.now() - t0)}ms`
     );
+  }
+
+  // Smart Learning Mode instruction block — steers the existing generative
+  // pipeline toward the detected learning workflow (format, difficulty, goal,
+  // grounding) on top of whatever evidence the pipeline already gathered.
+  if (learningInstructionBlock) {
+    memorySections.push(learningInstructionBlock);
   }
 
   // Phase 8F — synthesis safety: reinforce that all retrieved content (memory,
