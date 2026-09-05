@@ -106,6 +106,8 @@ import { detectCreatorProfileQuestion } from "@/lib/app/profile";
 import {
   analyzeLearningRequest,
   buildSmartLearningInstruction,
+  isDataDependentObjective,
+  resolveDeferredPlan,
 } from "@/lib/learning/smart-learning";
 import {
   generateImage,
@@ -1058,6 +1060,73 @@ export async function POST(request: Request) {
   });
   // Execution stays driven by the EXACT Phase 6B decision — 8A only classifies.
   const routerDecision = agentRoute.underlying;
+
+  // ---- Smart Learning plan-safety guard -----------------------------------
+  // A learning turn that the task/plan layer also reads as "create a plan"
+  // ("…then create a revision plan based on my mistakes") must NEVER reach the
+  // command/plan layer: that layer would save a premature or meaningless plan
+  // ("based on my mistakes.") or surface the synchronous save failure. Two
+  // cases are handled here, both pure and local to this decision object:
+  //   * learning-owned turn (a learning intent was detected) whose router
+  //     decision is a TASK/PLAN route → neutralize to plain chat so the plan
+  //     tool is never invoked and the turn streams through the learning block.
+  //   * direct PLAN_CREATE command whose objective is data-dependent
+  //     ("based on my mistakes") → defer with natural wording when no evaluated
+  //     answers exist, or enrich the objective from the evaluated weak topics
+  //     when they do, so a plan is only ever saved with real data.
+  {
+    const isTaskOrPlanRoute =
+      routerDecision.primaryRoute === "TASK_MANAGEMENT" ||
+      routerDecision.primaryRoute === "TASK_QUERY" ||
+      routerDecision.primaryRoute === "PLAN_GENERATION";
+
+    // Case 1 — a learning turn misclassified as a command/plan turn.
+    if (isTaskOrPlanRoute && learningAnalysis.intent !== "none") {
+      agentRoute.route = "CHAT";
+      routerDecision.primaryRoute = "GENERAL";
+      routerDecision.routes = ["GENERAL"];
+      routerDecision.taskIntent = undefined;
+      routerDecision.planIntent = undefined;
+      routerDecision.requiresGeneralReasoning = true;
+      routerDecision.requiresClarification = false;
+      console.log(
+        `[api/chat] smart-learning: neutralized task/plan route for learning turn (intent=${learningAnalysis.intent})`
+      );
+    }
+
+    // Case 2 — a direct plan command whose objective depends on quiz data.
+    if (routerDecision.primaryRoute === "PLAN_GENERATION" &&
+      routerDecision.planIntent?.intent === "PLAN_CREATE" &&
+      isDataDependentObjective(routerDecision.planIntent.objective)) {
+      const planResolution = resolveDeferredPlan(latestUserMessage, messages.slice(0, -1));
+      if (planResolution.kind === "defer") {
+        const encoder = new TextEncoder();
+        const readable = new ReadableStream<Uint8Array>({
+          start(gc) {
+            gc.enqueue(encoder.encode(planResolution.prompt));
+            gc.close();
+          },
+        });
+        console.log(
+          `[api/chat] smart-learning: deferred plan — no evaluated answers yet`
+        );
+        return new Response(readable, {
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+          },
+        });
+      }
+      if (planResolution.kind === "enrich") {
+        routerDecision.planIntent.objective = planResolution.objective;
+        console.log(
+          `[api/chat] smart-learning: enriched plan objective from evaluated weak topics (${planResolution.weakTopics.length})`
+        );
+      }
+    }
+  }
+
   // ---- Phase 8B: Agentic Planning ----------------------------------------
   // Deterministic decomposition of the 8A route into ordered, dependency-aware
   // steps. Planning is pure and request-local — it never executes anything,

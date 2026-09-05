@@ -233,9 +233,87 @@ const adaptive = buildSmartLearningInstruction({
   hasFocus: false,
   pendingIntent: null,
   weakTopics: [],
+  deferredPlan: false,
   clarifier: null,
 });
 check("adaptive depth fallback", adaptive.includes("ADAPTIVE depth"), true);
+
+// ---------------------------------------------------------------------------
+// Plan-context safety regression tests (production bug: premature plan save)
+// ---------------------------------------------------------------------------
+
+import {
+  hasImmediatePlanRequest,
+  isConditionalPlanRequest,
+  isDataDependentObjective,
+  resolveDeferredPlan,
+} from "@/lib/learning/smart-learning";
+
+const PROD_MESSAGE =
+  "I want to learn binary trees. I'm a beginner. First determine my current level by asking me a few questions. Then teach me step by step. I may upload screenshots, diagrams, or questions during the lesson. After teaching, give me a 10-question quiz one question at a time. Evaluate my answers, identify my weak topics, and create a revision plan based on my mistakes. Explain every question instead of just giving the answer.";
+
+// TEST 1 — the exact production failure message must stay in the learning
+// workflow. The plan tail must never become the topic/goal and must be flagged
+// as a future (deferred) plan, never an immediate planner action.
+const t1 = analyze(PROD_MESSAGE, []);
+check("T1 prod: intent quiz (not clarify/task)", t1.intent, "quiz");
+check("T1 prod: difficulty beginner", t1.difficulty, "beginner");
+check("T1 prod: goal learn (not revision)", t1.goal, "learn");
+check("T1 prod: topic binary trees", t1.topic, "binary trees");
+check("T1 prod: deferredPlan true", t1.deferredPlan, true);
+
+// TEST 2 — quiz-then-plan: the plan is only future work.
+const t2 = analyze(
+  "Quiz me on Java and after the quiz create a revision plan based on my mistakes. I'm a beginner.",
+  []
+);
+check("T2 quiz: intent quiz", t2.intent, "quiz");
+check("T2 quiz: topic java", t2.topic, "java");
+check("T2 quiz: deferredPlan true", t2.deferredPlan, true);
+
+// TEST 3 — a direct, unconditional plan request must remain a plain planner
+// request, not a learning intent.
+const t3 = analyze("Create a revision plan for Java.", []);
+check("T3 direct plan: intent none", t3.intent, "none");
+check("T3 direct plan: not deferred-plan language", t3.deferredPlan, false);
+
+// TEST 4 — a 7-day study plan is planner-owned, not learning.
+const t4 = analyze("Create a 7-day study plan for binary trees.", []);
+check("T4 study plan: intent none", t4.intent, "none");
+
+// TEST 5 — teach-then-plan reads as a learning workflow with a clear topic.
+const t5 = analyze(
+  "Teach me binary trees and later make a plan based on what I get wrong. I'm a beginner.",
+  []
+);
+check("T5 teach: intent explain", t5.intent, "explain");
+check("T5 teach: topic binary trees", t5.topic, "binary trees");
+check("T5 teach: deferredPlan true", t5.deferredPlan, true);
+
+// TEST 6 — conditional-plan resolution without evaluated answers defers.
+check("T6 defer enriches when weak topics exist", (() => {
+  const res = resolveDeferredPlan(
+    "Create a revision plan based on my mistakes.",
+    evaluation,
+  );
+  return res.kind === "enrich" && res.weakTopics.length > 0;
+})(), true);
+check("T6 defer without data is not proceed", (() => {
+  const res = resolveDeferredPlan("Create a revision plan based on my mistakes.", []);
+  return res.kind === "defer" && typeof res.prompt === "string";
+})(), true);
+check("T6 non-data plan proceeds unchanged", (() => {
+  const res = resolveDeferredPlan("Create a revision plan for Java.", []);
+  return res.kind === "proceed";
+})(), true);
+check("T6 data-dependent impl marker", isDataDependentObjective("based on my mistakes"), true);
+check("T6 clean marker", isDataDependentObjective("for Java"), false);
+
+// Plan-context flags used by the chat route.
+check("P1 immediate plan request", hasImmediatePlanRequest("create a revision plan based on my mistakes"), true);
+check("P1 no plan", hasImmediatePlanRequest("explain binary trees"), false);
+check("P2 conditional plan", isConditionalPlanRequest("after the quiz create a revision plan based on my mistakes"), true);
+check("P2 plain plan not conditional", isConditionalPlanRequest("create a revision plan for Java"), false);
 
 console.log(`\nsmart-learning tests: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

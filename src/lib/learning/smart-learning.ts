@@ -62,6 +62,13 @@ export interface SmartLearningAnalysis {
   > | null;
   /** Weak topics targeted by a weak_revision request. */
   weakTopics: string[];
+  /**
+   * True when this learning turn also mentions a plan as a FUTURE step
+   * ("after the quiz, create a revision plan based on my mistakes"). Such a
+   * plan is conditional on quiz data that does not exist yet, so the route
+   * must never hand this turn to the task/plan command layer.
+   */
+  deferredPlan: boolean;
   /** Deterministic clarifier text to stream back (intent === "clarify"). */
   clarifier: string | null;
 }
@@ -99,6 +106,28 @@ const EDIT_GUARD =
 
 const PLANNER_GUARD =
   /\b(?:study plan|planner|schedule|timetable|routine|calendar)\b/i;
+
+// ---------------------------------------------------------------------------
+// Plan-context safety (Smart Learning orchestration).
+//
+// These lexicons exist ONLY to tell the chat route whether a turn that the
+// general task/plan detector reads as "create a plan" is actually a learning
+// turn that should stay in the learning workflow instead. They never change
+// how an EXPLICIT, unconditional plan request is handled ("create a 7-day
+// study plan for chemistry" is not a learning turn and passes through).
+// ---------------------------------------------------------------------------
+
+/** Markers that frame a plan as dependent on FUTURE quiz/evaluation results. */
+const PLAN_CONDITIONAL =
+  /\b(?:based\s+on\s+(?:my\s+)?mistakes?|based\s+on\s+what\s+(?:i\s+|you\s+)get\s+(?:wrong|right)|from\s+(?:my|the|your)\s+wrong\s+answers?|when\s+you\s+know\s+(?:my\s+)?weak\s+areas?\b|(?:after|once|when)\s+(?:the\s+)?(?:quizzes?|tests?|assessment|lesson|session|unit)\b|after\s+(?:the\s+)?(?:quiz|test|assessment|lesson))\b/i;
+
+/** Explicit, immediate plan-creation verbs ("create a … plan", "make a plan"). */
+const PLAN_IMMEDIATE_VERB =
+  /\b(?:create|make|build|prepare|draw\s+up|put\s+together)\b.{0,40}\b(?:plan|schedule|timetable|routine|roadmap|itinerary)\b/i;
+
+/** Verbs that teach or inspect material (imply a learning workflow). */
+const LEARNING_VERB =
+  /\b(?:teach|learn|quiz|practice|explain|revise|study)\b/i;
 
 const DIFFICULTY_RULES: Array<[LearningDifficulty, RegExp]> = [
   [
@@ -141,13 +170,44 @@ const ANSWER_PATTERNS: RegExp[] = [
   /^\s*[A-Da-d]\s*$/,
 ];
 
+/**
+ * Cuts a compound request at the first FUTURE plan marker so the topic and
+ * goal detectors never read the plan's tail ("after the quiz, create a
+ * revision plan based on my mistakes") as learning content. Pure string work;
+ * the full message is always what the router sees.
+ */
+function stripPlanTail(message: string): string {
+  let out = message;
+  for (const marker of [
+    /\b(?:and\s+then|,?\s*then|,?\s*later)\s*(?:create|make|build|generate|prepare|draw\s+up|put\s+together)\s+a?\s*(?:revision|study)?\s*plan/i,
+    /\b(?:after\s+(?:the\s+)?(?:quiz|lesson|session|assessment|test|teaching)|once\s+(?:the\s+)?(?:quiz|lesson|session|assessment|test)\s+(?:is\s+)?(?:over|done)|when\s+you\s+know\s+(?:my\s+)?weak)/i,
+    /\bbased\s+on\s+(?:my|the|your|our)\s*(?:mistakes?|wrong\s+answers?|incorrect\s+answers?|weak\s+(?:topics?|areas?)|errors?)/i,
+    /\b(?:from|using)\s+(?:my|the|your|our)\s+(?:mistakes?|wrong\s+answers?|incorrect\s+answers?|weak\s+(?:topics?|areas?)|errors?)/i,
+  ]) {
+    const hit = marker.exec(out);
+    if (hit && hit.index >= 8) out = out.slice(0, hit.index);
+  }
+  return out
+    .replace(/\s*(?:,|;)?\s*(?:and|then|after|plus|also|so|but|with)\s*$/i, "")
+    .replace(/[.,;:!?]+\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extractTopic(message: string): string | null {
+  const clipped = stripPlanTail(message);
   // Prefer vivid connectors; fall back to "for" and then clip preference tails.
   const preferred =
     /\b(?:on|about|over|regarding|covering|based on)\b[ \t]+(.+?)(?:[.!?]|$)/i;
+  const learnedVerb =
+    /\b(?:teach\s+(?:me\s+)?|learn(?:ing)?\s+|understand\s+|study\s+|revise\s+|cover\s+)(.+?)(?:[.!?]|$)/i;
   const fallback = /\bfor\b[ \t]+(.+?)(?:[.!?]|$)/i;
 
-  const raw = preferred.exec(message)?.[1] ?? fallback.exec(message)?.[1] ?? null;
+  const raw =
+    preferred.exec(clipped)?.[1] ??
+    learnedVerb.exec(clipped)?.[1] ??
+    fallback.exec(clipped)?.[1] ??
+    null;
   if (!raw) return null;
 
   let topic = raw.trim();
@@ -156,7 +216,9 @@ function extractTopic(message: string): string | null {
     .replace(/\s*,\s*(?:beginner|intermediate|advanced|expert|easy|basic)\s*.*$/i, "")
     .trim();
   topic = topic.replace(/\s+(?:beginner|intermediate|advanced|expert|for beginners)$/i, "").trim();
+  topic = topic.replace(/\s*(?:and|then|after|plus|also|so|but|with)\s*$/i, "").trim();
   topic = topic.replace(/\s*[,;]\s*$/, "").trim();
+  topic = topic.toLowerCase();
   if (!topic) return null;
   topic = topic.replace(/^(?:the|my|our|these|this|a|an)\s+/i, "").trim();
   if (topic.length > 90) return null;
@@ -215,10 +277,20 @@ function detectRevisionIntent(message: string): boolean {
 function detectExplainIntent(message: string): boolean {
   if (PLANNER_GUARD.test(message)) return false;
   if (!EXPLAIN_VERB.test(message)) return false;
-  return detectDifficulty(message) !== null || ADAPTIVE_CUE.test(message);
+  return (
+    detectDifficulty(message) !== null ||
+    ADAPTIVE_CUE.test(message) ||
+    isConditionalPlanRequest(message)
+  );
 }
 
 function detectIntent(message: string): "quiz" | "revision" | "explain" | "none" {
+  // A pure, unconditional plan request ("create a revision plan for Java",
+  // "create a study plan for chemistry") is the Planner's job — never a
+  // learning intent, even though it uses the word "revision".
+  if (hasImmediatePlanRequest(message) && !LEARNING_VERB.test(message)) {
+    return "none";
+  }
   if (detectQuizIntent(message)) return "quiz";
   if (detectRevisionIntent(message)) return "revision";
   if (detectExplainIntent(message)) return "explain";
@@ -397,6 +469,86 @@ export function isPreferencePhrase(message: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Plan-context safety (Smart Learning orchestration)
+//
+// Purpose: prevent a learning turn that mentions a plan as a FUTURE step
+// ("after the quiz, create a revision plan based on my mistakes") from
+// reaching the general task/plan command layer, which would otherwise treat
+// the trailing phrase as an immediate plan-creation objective and either save
+// a premature plan or fail. These helpers are pure and carry no side effects.
+// ---------------------------------------------------------------------------
+
+/** Whether a plan mention is conditioned on the learning workflow's results. */
+export function isConditionalPlanRequest(message: string): boolean {
+  if (!PLAN_IMMEDIATE_VERB.test(message)) return false;
+  return PLAN_CONDITIONAL.test(message);
+}
+
+/** Whether the message contains a plan request of any kind. */
+export function hasImmediatePlanRequest(message: string): boolean {
+  return PLAN_IMMEDIATE_VERB.test(message);
+}
+
+// ---------------------------------------------------------------------------
+// Deferred-plan resolution (for direct, unconditional plan commands)
+// ---------------------------------------------------------------------------
+
+/**
+ * A plan command whose objective reads from quiz/answer data rather than a
+ * real subject ("based on my mistakes", "for my weak topics"). Such commands
+ * are only safe to execute once evaluated answers exist in the conversation.
+ */
+const DATA_DEPENDENT_OBJECTIVE =
+  /\b(?:based\s+on|from|using|by\s+using)\s+(?:my|the|your|our)?\s*(?:mistakes?|wrong\s+(?:answers?|topics?)|incorrect\s+(?:answers?|topics?)|errors?|weak\s+(?:topics?|areas?))\b|\bpointer\s+out\s+what\s+i\s+got\s+wrong\b/i;
+
+export function isDataDependentObjective(message: string): boolean {
+  return DATA_DEPENDENT_OBJECTIVE.test(message);
+}
+
+const DEFER_PLAN_PROMPT =
+  "I can create the revision plan after we finish the quiz, so I can base it on your actual mistakes. Nothing has been recorded yet.";
+
+export type DeferredPlanResolution =
+  | { kind: "proceed" }
+  | { kind: "defer"; prompt: string }
+  | { kind: "enrich"; objective: string; weakTopics: string[] };
+
+function topicFromHistory(turns: LearningTurn[]): string | null {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    if (turns[i].role !== "user") continue;
+    const topic = extractTopic(turns[i].content);
+    if (topic) return topic;
+  }
+  return null;
+}
+
+/**
+ * Resolves a direct PLAN_CREATE command into what should actually happen.
+ *   - not data-dependent        → proceed unchanged (existing Planner behavior)
+ *   - data-dependent, no data   → defer with a natural, non-error reply
+ *   - data-dependent, quiz data → enrich the objective with the evaluated
+ *                                 weak topics so the saved plan is meaningful
+ */
+export function resolveDeferredPlan(
+  message: string,
+  history: LearningTurn[]
+): DeferredPlanResolution {
+  if (!isDataDependentObjective(message)) return { kind: "proceed" };
+
+  const weakTopics = extractWeakTopics(history);
+  if (weakTopics.length === 0) {
+    return { kind: "defer", prompt: DEFER_PLAN_PROMPT };
+  }
+
+  const subject = topicFromHistory(history) ?? "your evaluated weak areas";
+  const objective = `Revision plan for ${subject} based on your weakest topics: ${weakTopics.join(", ")}`.slice(
+    0,
+    1000
+  );
+  return { kind: "enrich", objective, weakTopics };
+}
+
+// ---------------------------------------------------------------------------
 // Public analysis entry point
 // ---------------------------------------------------------------------------
 
@@ -412,11 +564,16 @@ export function analyzeLearningRequest(
     hasFocus: false,
     pendingIntent: null,
     weakTopics: [],
+    deferredPlan: false,
     clarifier: null,
   };
 
   const trimmed = message.trim();
   if (!trimmed) return base;
+
+  // Plan mentions that are FUTURE steps ("…then create a revision plan based
+  // on my mistakes") never become the turn's topic/goal or a plan request.
+  const clipped = stripPlanTail(trimmed);
 
   const history = scanTurnsForPreferences(priorTurns);
   const lastAssistant = [...priorTurns]
@@ -475,10 +632,12 @@ export function analyzeLearningRequest(
   const intent = detectIntent(trimmed);
   if (intent === "none") return base;
 
-  const difficulty = detectDifficulty(trimmed) ?? history.difficulty;
-  const goal = detectGoal(trimmed) ?? history.goal;
-  const topic = extractTopic(trimmed);
+  const difficulty =
+    detectDifficulty(clipped) ?? detectDifficulty(trimmed) ?? history.difficulty;
+  const goal = detectGoal(clipped) ?? detectGoal(trimmed) ?? history.goal;
+  const topic = extractTopic(clipped);
   const hasFocus = topic !== null;
+  const deferredPlan = hasImmediatePlanRequest(trimmed);
 
   // Clarity gate: when quiz/revision/explain is detected but no depth has been
   // stated anywhere, a single deterministic clarifier improves the result.
@@ -491,6 +650,7 @@ export function analyzeLearningRequest(
       goal,
       topic,
       hasFocus,
+      deferredPlan,
       clarifier: buildClarifier(intent, difficulty, goal, hasFocus),
     };
   }
@@ -502,6 +662,7 @@ export function analyzeLearningRequest(
     goal,
     topic,
     hasFocus,
+    deferredPlan,
   };
 }
 
