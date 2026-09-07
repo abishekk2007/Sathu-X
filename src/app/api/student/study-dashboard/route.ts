@@ -7,8 +7,22 @@ import {
   toDateOnly,
   weekStartIso,
 } from "@/lib/study-planner";
+import {
+  buildChatSources,
+  buildDocumentSources,
+  buildPlannerSources,
+  buildRecentActivity,
+  buildSubjects,
+  computeFlashcardStats,
+  computeTodayStudy,
+  resolveDailyGoal,
+} from "@/lib/study-dashboard";
 import { getAuthenticatedUser, getSupabaseServerClient } from "@/lib/supabase/server";
-import type { NextExamSummary, StudyDashboardData, StudySessionRecord } from "@/types";
+import type {
+  NextExamSummary,
+  StudyDashboardData,
+  StudySessionRecord,
+} from "@/types";
 
 export const runtime = "nodejs";
 
@@ -27,6 +41,9 @@ const querySchema = z.object({
 const EXAM_SELECT =
   "id, title, exam_date, exam_type, target_score, priority, status, subject:subjects(name)";
 const SESSION_SELECT = "*, subject:subjects(name), topic:subject_topics(name)";
+const CHAT_SELECT =
+  "started_at, ended_at, active_seconds, subject_id, topic_id, " +
+  "subject:subjects(name), topic:subject_topics(name)";
 
 interface ExamJoinRow {
   id: string;
@@ -53,8 +70,10 @@ function toExamSummary(row: ExamJoinRow, todayIso: string): NextExamSummary {
 }
 
 /**
- * Aggregated study dashboard. Seven bounded reads, every number derived from
- * real RLS-scoped rows; the client's local `today` anchors all grouping.
+ * Aggregated study dashboard. Bounded parallel reads, every number derived
+ * from real RLS-scoped rows; the client's local `today` anchors all grouping.
+ * Subjects, daily-goal, flashcard counts and recent activity are all real —
+ * no fabricated/demo values are ever returned or fallen back to.
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser();
@@ -71,6 +90,7 @@ export async function GET(request: Request) {
   const weekStart = weekStartIso(todayIso);
   const weekEnd = addDaysLocal(weekStart, 6);
   const streakFloor = addDaysLocal(todayIso, -60);
+  const activityFloor = addDaysLocal(todayIso, -6);
 
   try {
     const supabase = await getSupabaseServerClient();
@@ -83,6 +103,12 @@ export async function GET(request: Request) {
       goalsResult,
       plansResult,
       topicsResult,
+      profileResult,
+      chatActivityResult,
+      subjectRowsResult,
+      subjectTopicsResult,
+      flashcardsResult,
+      documentsResult,
     ] = await Promise.all([
       supabase
         .from("exams")
@@ -130,6 +156,39 @@ export async function GET(request: Request) {
         .neq("status", "not_started")
         .order("mastery", { ascending: true })
         .limit(100),
+      // Daily goal from the profile's real routine preferences.
+      supabase
+        .from("profiles")
+        .select("daily_study_target_minutes")
+        .maybeSingle(),
+      // Chat study (last 7 days) — feeds today's minutes + recent activity.
+      supabase
+        .from("chat_study_sessions")
+        .select(CHAT_SELECT)
+        .gte("started_at", `${activityFloor}T00:00:00`)
+        .order("started_at", { ascending: false })
+        .limit(100),
+      // Subjects + all their topics for real per-subject progress.
+      supabase
+        .from("subjects")
+        .select("id, name")
+        .order("updated_at", { ascending: false })
+        .limit(100),
+      supabase
+        .from("subject_topics")
+        .select("id, subject_id, name, mastery, status")
+        .limit(1000),
+      // Flashcard counts (real user data).
+      supabase
+        .from("flashcards")
+        .select("last_reviewed_at")
+        .limit(1000),
+      // Recently uploaded documents (recent activity source).
+      supabase
+        .from("documents")
+        .select("id, name, created_at")
+        .order("created_at", { ascending: false })
+        .limit(5),
     ]);
 
     const firstError =
@@ -139,7 +198,13 @@ export async function GET(request: Request) {
       streakResult.error ??
       goalsResult.error ??
       plansResult.error ??
-      topicsResult.error;
+      topicsResult.error ??
+      profileResult.error ??
+      chatActivityResult.error ??
+      subjectRowsResult.error ??
+      subjectTopicsResult.error ??
+      flashcardsResult.error ??
+      documentsResult.error;
     if (firstError) {
       console.error("[api/student/study-dashboard] Query failed");
       return jsonError(500, "server_error");
@@ -203,6 +268,73 @@ export async function GET(request: Request) {
     const activeGoals = goalsResult.data ?? [];
     const activePlanRow = (plansResult.data ?? [])[0] ?? null;
 
+    // ---- Today's study minutes (planner completed + chat study) --------------
+    const chatRows = (chatActivityResult.data ?? []) as unknown as Array<{
+      started_at: string;
+      ended_at: string | null;
+      active_seconds: number;
+      subject_id: string | null;
+      topic_id: string | null;
+      subject: { name: string }[] | null;
+      topic: { name: string }[] | null;
+    }>;
+    const chatTodayRows = chatRows.filter(
+      (row) => toDateOnly(new Date(row.started_at)) === todayIso
+    );
+    const todaySummary = computeTodayStudy(todaySessions, chatTodayRows);
+    const todayPlannedMinutes = todaySummary.planned;
+
+    // ---- Daily goal (profile routine; fallback to newest active goal) --------
+    const profileRow = profileResult.data as
+      | { daily_study_target_minutes: number | null }
+      | null;
+    const dailyGoalMinutes = resolveDailyGoal(
+      profileRow?.daily_study_target_minutes ?? null,
+      activeGoals as Array<{ target_minutes: number | null }>
+    );
+
+    // ---- Subjects: real progress + next topic --------------------------------
+    const subjectRows = (subjectRowsResult.data ?? []) as Array<{
+      id: string;
+      name: string;
+    }>;
+    const subjectTopicRows = (subjectTopicsResult.data ?? []) as Array<{
+      id: string;
+      subject_id: string;
+      name: string;
+      mastery: number;
+      status: string;
+    }>;
+    const subjects = buildSubjects(subjectRows, subjectTopicRows);
+
+    // ---- Flashcards: real counts ---------------------------------------------
+    const flashcardRows = (flashcardsResult.data ?? []) as Array<{
+      last_reviewed_at: string | null;
+    }>;
+    const flashcards = computeFlashcardStats(flashcardRows, todayIso);
+
+    // ---- Recent activity (chat + completed sessions + documents) -------------
+    const recentActivity = buildRecentActivity(
+      [
+        ...buildChatSources(
+          chatRows.map((row) => ({
+            started_at: row.started_at,
+            ended_at: row.ended_at,
+            active_seconds: row.active_seconds,
+            subject_id: row.subject_id,
+            topic_id: row.topic_id,
+            subjectName: row.subject?.[0]?.name ?? null,
+            topicName: row.topic?.[0]?.name ?? null,
+          }))
+        ),
+        ...buildPlannerSources(todaySessions),
+        ...buildDocumentSources(
+          (documentsResult.data ?? []) as Array<{ name: string; created_at: string }>
+        ),
+      ],
+      todayIso
+    );
+
     // ---- Deterministic recommendation ---------------------------------------
     const weakestTopicRow = (
       (topicsResult.data ?? []) as Array<{
@@ -225,9 +357,7 @@ export async function GET(request: Request) {
           }
         : null,
       unfinishedToday,
-      completedTodayMinutes: todaySessions
-        .filter((session) => session.status === "completed")
-        .reduce((sum, session) => sum + session.durationMinutes, 0),
+      completedTodayMinutes: todaySummary.completed,
       activeGoal:
         (activeGoals[0] as
           | { title: string; target_minutes: number | null }
@@ -280,6 +410,12 @@ export async function GET(request: Request) {
       recommendation: recommendation
         ? `${recommendation}`.replace(/^"|"$/g, "")
         : null,
+      todayCompletedMinutes: todaySummary.completed,
+      todayPlannedMinutes,
+      dailyGoalMinutes,
+      subjects,
+      flashcards,
+      recentActivity,
     };
 
     return Response.json(payload);

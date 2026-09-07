@@ -640,6 +640,18 @@ export interface StudyDashboardData {
   activeGoals: StudyGoalRecord[];
   activePlan: StudyPlanRecord | null;
   recommendation: string | null;
+  /** Real completed study minutes today (planner completed + chat study). */
+  todayCompletedMinutes: number;
+  /** Real planned minutes today from planner sessions (any active status). */
+  todayPlannedMinutes: number;
+  /** Real daily goal from profiles (fallback: newest active study goal). */
+  dailyGoalMinutes: number | null;
+  /** Real per-subject progress + next topic, derived from subject_topics. */
+  subjects: StudySubject[];
+  /** Real flashcard counts for the current user. */
+  flashcards: { total: number; due: number };
+  /** Recent real study activity (chat, completed sessions, documents). */
+  recentActivity: StudyActivity[];
 }
 
 export interface NextExamSummary {
@@ -686,15 +698,33 @@ export interface DocumentGroundingContext {
 export interface StudySubject {
   id: string;
   name: string;
+  /** 0–100, average mastery of the subject's topics (0 when no topics). */
   progress: number;
-  nextTopic: string;
+  /** Next topic name; null when the subject has no topics yet. */
+  nextTopic: string | null;
 }
 
 export interface StudyActivity {
   id: string;
   action: string;
-  subject: string;
+  /** Subject name when the activity is tied to one, else null. */
+  subject: string | null;
   timeLabel: string;
+}
+
+/** A single user-created flashcard, returned by the flashcards APIs. */
+export interface StudyFlashcard {
+  id: string;
+  subjectId: string | null;
+  subjectName: string | null;
+  question: string;
+  answer: string;
+  reviewCount: number;
+  lastReviewedAt: string | null;
+  /** True when the card is due for review today (never reviewed or reviewed before today). */
+  isDue: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type NotificationKind = "reminder" | "goal" | "document";
